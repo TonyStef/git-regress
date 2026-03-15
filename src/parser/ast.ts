@@ -1,5 +1,5 @@
 import path from 'path';
-import Parser from 'web-tree-sitter';
+import Parser = require('web-tree-sitter');
 import type { SymbolKind } from '../graph/footprint';
 
 type Node = Parser.SyntaxNode;
@@ -33,7 +33,7 @@ function resolveWasm(filename: string): string {
   const bundledPath = path.join(__dirname, filename);
   if (fs.existsSync(bundledPath)) return bundledPath;
 
-  if (filename === 'web-tree-sitter.wasm') {
+  if (filename === 'tree-sitter.wasm') {
     return path.join(path.dirname(require.resolve('web-tree-sitter')), filename);
   }
   return path.join(path.dirname(require.resolve('tree-sitter-wasms/package.json')), 'out', filename);
@@ -43,7 +43,7 @@ async function ensureInit(): Promise<void> {
   if (initialized) return;
 
   await Parser.init({
-    locateFile: () => resolveWasm('web-tree-sitter.wasm'),
+    locateFile: () => resolveWasm('tree-sitter.wasm'),
   });
 
   parser = new Parser();
