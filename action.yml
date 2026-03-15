@@ -1,0 +1,21 @@
+name: 'git-regress'
+description: 'Detects semantic regressions across PRs that git merge conflict detection misses'
+inputs:
+  github-token:
+    description: 'GitHub token for posting PR comments'
+    required: true
+  lookback-days:
+    description: 'Number of days to look back for recently merged PRs'
+    default: '14'
+  base-branch:
+    description: 'Base branch to compare against'
+    default: 'main'
+  mode:
+    description: 'Run mode: "check" for PR analysis, "store" for footprint storage'
+    default: 'check'
+  pr-number:
+    description: 'PR number (required for store mode, auto-detected in check mode)'
+    default: ''
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
