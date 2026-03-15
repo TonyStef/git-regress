@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="ok.svg" width="80" height="80" alt="git-regress" />
+</p>
+
 # git-regress
 
 Detects semantic regressions across PRs that git's merge conflict detection misses.
