@@ -3,3 +3,6 @@ dist/
 .git-regress/
 *.tsbuildinfo
 features.md
+site/node_modules/
+site/build/
+site/.svelte-kit/
