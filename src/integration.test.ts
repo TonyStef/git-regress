@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { execSync } from 'child_process';
 import fs from 'fs';
-import path from 'path';
 import os from 'os';
+import path from 'path';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const CLI = path.resolve(__dirname, '../dist/index.js');
 
@@ -103,12 +103,7 @@ describe('integration: full regression detection scenario', () => {
 
     fs.writeFileSync(
       path.join(repoDir, 'helpers.ts'),
-      [
-        'export function computeSegments(input: string) {',
-        '  return input.split("\\n");',
-        '}',
-        '',
-      ].join('\n'),
+      ['export function computeSegments(input: string) {', '  return input.split("\\n");', '}', ''].join('\n'),
     );
 
     run('git add -A && git commit -m "Refactor: remove unused helpers"', repoDir);
@@ -127,13 +122,7 @@ describe('integration: full regression detection scenario', () => {
 
     fs.writeFileSync(
       path.join(repoDir, 'types.ts'),
-      [
-        'export interface UserConfig {',
-        '  name: string;',
-        '  theme: "light" | "dark";',
-        '}',
-        '',
-      ].join('\n'),
+      ['export interface UserConfig {', '  name: string;', '  theme: "light" | "dark";', '}', ''].join('\n'),
     );
 
     run('git add -A && git commit -m "Add UserConfig type"', repoDir);
@@ -174,10 +163,7 @@ describe('integration: full regression detection scenario', () => {
     const branch = 'pr-40';
     run(`git checkout -b ${branch}`, repoDir);
 
-    fs.writeFileSync(
-      path.join(repoDir, 'newfile.ts'),
-      'export function brandNew() { return true; }\n',
-    );
+    fs.writeFileSync(path.join(repoDir, 'newfile.ts'), 'export function brandNew() { return true; }\n');
 
     run('git add -A && git commit -m "Add brand new function"', repoDir);
 

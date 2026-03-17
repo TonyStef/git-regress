@@ -16,7 +16,7 @@ bun run build
 ```bash
 bun run build        # compile TS + bundle with ncc + copy WASM files
 bun run typecheck    # type-check without emitting
-bun run test         # 17 tests (diff parser + detection engine)
+bun run test         # 21 tests (diff parser, detection engine, integration)
 bun run test:watch   # tests in watch mode
 bun run lint         # Biome: no any, no unused imports, sorted imports
 bun run lint:fix     # auto-fix lint issues
@@ -102,11 +102,30 @@ Footprints are stored in `.git-regress/footprints.json` at the repo root (gitign
 
 When `--github-token`, `--owner`, `--repo`, and `--pr` are all provided, the tool posts a comment on the PR via Octokit. It uses an HTML comment tag (`<!-- git-regress -->`) to identify its own comments and updates them in-place instead of creating duplicates. Comment lookup is paginated so it works on PRs with 30+ comments. GitHub API failures are caught separately — they log a warning but don't fail the CI check.
 
+### GitHub Action integration
+
+The action is a single `dist/index.js` entry point. When `GITHUB_ACTIONS=true` (set by GitHub's runner), `index.ts` delegates to `action.ts` instead of the Commander.js CLI.
+
+`action.ts` auto-detects the event type:
+
+- **`push` to base branch**: extracts the merged PR number from the merge commit message, squash merge pattern, or the GitHub API. Runs `store`, prunes old footprints, and commits/pushes `footprints.json` with `[skip ci]`.
+- **`pull_request`**: extracts the PR number from the event payload. Runs `check`, posts/updates/cleans up the PR comment.
+
+Footprint persistence across CI runs uses **git-committed storage**: the `.git-regress/footprints.json` file is committed to the repo by the action on each merge. This is zero-cost (no external services), survives cache evictions, and travels with forks.
+
+The commit uses `git-regress[bot]` as the author and includes `[skip ci]` to prevent infinite workflow triggers.
+
+### Stale comment cleanup
+
+When a PR previously had regressions but a new push resolves them, `postPRComment()` finds the existing git-regress comment and updates it to "All clear" instead of leaving a stale warning.
+
 ## Architecture
 
 ```
 src/
-├── index.ts              CLI entry. Two Commander.js commands: store and check.
+├── index.ts              CLI entry + GitHub Action dispatch (delegates to action.ts when GITHUB_ACTIONS=true).
+├── action.ts             GitHub Action orchestration. Auto-detects event, handles store/check/commit.
+├── core.ts               Shared store/check logic used by both CLI and Action.
 ├── config.ts             File filtering (extensions + ignore paths) and language detection.
 ├── git.ts                Shell-safe git wrappers. Ref validation, POSIX arg escaping, repo root caching.
 ├── parser/
@@ -115,11 +134,11 @@ src/
 │   └── diff.ts           Unified diff parser. Extracts files, hunks, line numbers from raw git diff output.
 ├── graph/
 │   ├── footprint.ts      Types: SymbolRef, PRFootprint, FootprintStore.
-│   ├── store.ts          JSON persistence. Atomic writes, ENOENT handling, lookback filtering.
+│   ├── store.ts          JSON persistence. Atomic writes, ENOENT handling, lookback filtering, pruning.
 │   └── detect.ts         Cross-reference engine. Matches deleted/modified symbols against stored footprints.
 ├── reporter/
 │   ├── cli.ts            Terminal output formatting.
-│   └── github.ts         PR comment posting via Octokit with pagination and upsert logic.
+│   └── github.ts         PR comment posting via Octokit with pagination, upsert, and stale cleanup.
 └── types/
     └── web-tree-sitter.d.ts   TypeScript declarations for the WASM tree-sitter CJS export.
 ```
@@ -132,7 +151,7 @@ src/
 2. `ncc build dist/index.js -o dist` bundles everything (commander, octokit, web-tree-sitter JS runtime) into a single `dist/index.js` (~478KB)
 3. Copies 3 WASM files into `dist/`: the tree-sitter runtime, TypeScript grammar, and TSX grammar
 
-The `dist/` directory is fully self-contained. The GitHub Action (`action.yml`) points directly at `dist/index.js` using the `node20` runtime — GitHub runs it with zero installation steps.
+The `dist/` directory is fully self-contained. The GitHub Action (`action.yml`) points directly at `dist/index.js` using the `node20` runtime — GitHub runs it with zero installation steps. The bundle includes `@actions/core`, `@actions/github`, `commander`, `@octokit/rest`, and the `web-tree-sitter` JS runtime.
 
 At runtime, `ast.ts` resolves WASM files by checking `__dirname` first (works when bundled in `dist/`), then falls back to `node_modules/` paths (works during development).
 

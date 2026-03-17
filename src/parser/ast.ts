@@ -1,5 +1,7 @@
 import path from 'path';
+
 import Parser = require('web-tree-sitter');
+
 import type { SymbolKind } from '../graph/footprint';
 
 type Node = Parser.SyntaxNode;

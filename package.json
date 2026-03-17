@@ -31,6 +31,8 @@
     "node": ">=18"
   },
   "dependencies": {
+    "@actions/core": "1.11.1",
+    "@actions/github": "6.0.1",
     "@octokit/rest": "^22.0.1",
     "commander": "^14.0.3",
     "tree-sitter-wasms": "^0.1.13",

@@ -52,3 +52,27 @@ export function getRecentFootprints(lookbackDays: number): PRFootprint[] {
     return mergedAt >= cutoff;
   });
 }
+
+/**
+ * Remove footprints older than the lookback window.
+ * Called during store to keep the JSON file small over time.
+ */
+export function pruneOldFootprints(lookbackDays: number): number {
+  const store = loadFootprints();
+  const cutoff = Date.now() - lookbackDays * 24 * 60 * 60 * 1000;
+  let pruned = 0;
+
+  for (const [key, fp] of Object.entries(store)) {
+    const mergedAt = new Date(fp.merged_at).getTime();
+    if (mergedAt < cutoff) {
+      delete store[key];
+      pruned++;
+    }
+  }
+
+  if (pruned > 0) {
+    saveFootprints(store);
+  }
+
+  return pruned;
+}
