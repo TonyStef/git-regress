@@ -42,6 +42,16 @@ const cli_1 = require("./reporter/cli");
 const github_1 = require("./reporter/github");
 const LOOKBACK_DEFAULT = 14;
 /**
+ * In GitHub Actions, `actions/checkout` checks out a detached HEAD (the merge
+ * commit for PRs, or the pushed commit for pushes). The local branch name
+ * (e.g. `main`) doesn't exist — only `origin/main` does.
+ *
+ * Prefix `origin/` so git diff/show can resolve the ref.
+ */
+function remoteRef(baseBranch) {
+    return `origin/${baseBranch}`;
+}
+/**
  * Extract the merged PR number from a push event.
  *
  * Strategy (in order):
@@ -139,7 +149,7 @@ async function handlePush() {
     core.info(`Storing footprint for PR #${prNumber}...`);
     const result = await (0, core_1.runStore)({
         pr: prNumber,
-        base: `${baseBranch}~1`,
+        base: `${remoteRef(baseBranch)}~1`,
         head: 'HEAD',
         author,
         title,
@@ -169,7 +179,7 @@ async function handlePullRequest() {
     }
     const { owner, repo } = github.context.repo;
     core.info(`Checking PR #${prNumber} for semantic regressions...`);
-    const { regressions } = await (0, core_1.runCheck)({ base: baseBranch, lookbackDays });
+    const { regressions } = await (0, core_1.runCheck)({ base: remoteRef(baseBranch), lookbackDays });
     // Log results to the Actions console
     core.info((0, cli_1.formatRegressions)(regressions));
     // Post or update PR comment (also cleans up stale warnings)
