@@ -11,19 +11,32 @@ export interface GitHubReportOptions {
   prNumber: number;
 }
 
+/**
+ * Post, update, or clean up the git-regress PR comment.
+ *
+ * - If regressions exist: create or update the warning comment.
+ * - If no regressions: find any existing warning comment and update it to "all clear",
+ *   so stale warnings don't persist after fixes.
+ */
 export async function postPRComment(regressions: Regression[], options: GitHubReportOptions): Promise<void> {
-  if (regressions.length === 0) return;
-
   const octokit = new Octokit({ auth: options.token });
+
+  const existing = await findExistingComment(octokit, options);
+
+  if (regressions.length === 0) {
+    if (existing) {
+      const body = `${COMMENT_TAG}\nNo semantic regressions detected. All clear.`;
+      await octokit.issues.updateComment({
+        owner: options.owner,
+        repo: options.repo,
+        comment_id: existing.id,
+        body,
+      });
+    }
+    return;
+  }
+
   const body = `${COMMENT_TAG}\n${formatRegressions(regressions)}`;
-
-  const comments = await octokit.paginate(octokit.issues.listComments, {
-    owner: options.owner,
-    repo: options.repo,
-    issue_number: options.prNumber,
-  });
-
-  const existing = comments.find((c) => c.body?.includes(COMMENT_TAG));
 
   if (existing) {
     await octokit.issues.updateComment({
@@ -40,4 +53,17 @@ export async function postPRComment(regressions: Regression[], options: GitHubRe
       body,
     });
   }
+}
+
+async function findExistingComment(
+  octokit: Octokit,
+  options: GitHubReportOptions,
+): Promise<{ id: number } | undefined> {
+  const comments = await octokit.paginate(octokit.issues.listComments, {
+    owner: options.owner,
+    repo: options.repo,
+    issue_number: options.prNumber,
+  });
+
+  return comments.find((c) => c.body?.includes(COMMENT_TAG));
 }
