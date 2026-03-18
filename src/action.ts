@@ -72,10 +72,11 @@ function commitAndPushFootprints(baseBranch: string): void {
   const storePath = '.git-regress/footprints.json';
 
   try {
-    // Check if there are actual changes to commit
-    const status = execSync(`git status --porcelain "${storePath}"`, { encoding: 'utf-8' }).trim();
-    if (!status) {
-      core.info('No changes to footprints file, skipping commit.');
+    // Check if the footprints file exists on disk. It may be gitignored,
+    // so `git status --porcelain` won't show it. Check the filesystem directly.
+    const fs = require('fs') as typeof import('fs');
+    if (!fs.existsSync(storePath)) {
+      core.info('No footprints file found, skipping commit.');
       return;
     }
 
@@ -83,7 +84,15 @@ function commitAndPushFootprints(baseBranch: string): void {
     execSync('git config user.name "git-regress[bot]"', { encoding: 'utf-8' });
     execSync('git config user.email "git-regress[bot]@users.noreply.github.com"', { encoding: 'utf-8' });
 
-    execSync(`git add "${storePath}"`, { encoding: 'utf-8' });
+    // Use --force to add the file even if it's in .gitignore
+    execSync(`git add --force "${storePath}"`, { encoding: 'utf-8' });
+
+    // Check if there are staged changes (file might already be committed with same content)
+    const staged = execSync('git diff --cached --name-only', { encoding: 'utf-8' }).trim();
+    if (!staged) {
+      core.info('Footprints file unchanged, skipping commit.');
+      return;
+    }
     execSync('git commit -m "chore: update git-regress footprints [skip ci]"', { encoding: 'utf-8' });
 
     // Push using the token. The checkout action sets up the remote with the token
