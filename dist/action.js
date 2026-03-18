@@ -33,14 +33,16 @@ var __importStar = (this && this.__importStar) || (function () {
     };
 })();
 Object.defineProperty(exports, "__esModule", { value: true });
+const cache = __importStar(require("@actions/cache"));
 const core = __importStar(require("@actions/core"));
 const github = __importStar(require("@actions/github"));
-const child_process_1 = require("child_process");
 const core_1 = require("./core");
 const store_1 = require("./graph/store");
 const cli_1 = require("./reporter/cli");
 const github_1 = require("./reporter/github");
 const LOOKBACK_DEFAULT = 14;
+const CACHE_KEY = 'git-regress-footprints';
+const FOOTPRINTS_PATH = '.git-regress';
 /**
  * In GitHub Actions, `actions/checkout` checks out a detached HEAD (the merge
  * commit for PRs, or the pushed commit for pushes). The local branch name
@@ -96,41 +98,44 @@ async function resolvePRNumber(token) {
     return null;
 }
 /**
- * Commit and push the footprints file back to the repo.
- * Uses the github-token for authentication. Adds [skip ci] to avoid
- * triggering infinite workflow loops.
+ * Restore footprints from the GitHub Actions cache.
+ * The cache is shared across all branches in the repo.
+ * Returns true if cache was found, false otherwise.
  */
-function commitAndPushFootprints(baseBranch) {
-    const storePath = '.git-regress/footprints.json';
+async function restoreFootprintsCache() {
     try {
-        // Check if the footprints file exists on disk. It may be gitignored,
-        // so `git status --porcelain` won't show it. Check the filesystem directly.
-        const fs = require('fs');
-        if (!fs.existsSync(storePath)) {
-            core.info('No footprints file found, skipping commit.');
-            return;
+        const hitKey = await cache.restoreCache([FOOTPRINTS_PATH], CACHE_KEY, [CACHE_KEY]);
+        if (hitKey) {
+            core.info(`Restored footprints from cache (key: ${hitKey}).`);
+            return true;
         }
-        // Configure git identity for the commit
-        (0, child_process_1.execSync)('git config user.name "git-regress[bot]"', { encoding: 'utf-8' });
-        (0, child_process_1.execSync)('git config user.email "git-regress[bot]@users.noreply.github.com"', { encoding: 'utf-8' });
-        // Use --force to add the file even if it's in .gitignore
-        (0, child_process_1.execSync)(`git add --force "${storePath}"`, { encoding: 'utf-8' });
-        // Check if there are staged changes (file might already be committed with same content)
-        const staged = (0, child_process_1.execSync)('git diff --cached --name-only', { encoding: 'utf-8' }).trim();
-        if (!staged) {
-            core.info('Footprints file unchanged, skipping commit.');
-            return;
-        }
-        (0, child_process_1.execSync)('git commit -m "chore: update git-regress footprints [skip ci]"', { encoding: 'utf-8' });
-        // Push using the token. The checkout action sets up the remote with the token
-        // when fetch-depth: 0 is used, so a plain push works.
-        (0, child_process_1.execSync)(`git push origin HEAD:${baseBranch}`, { encoding: 'utf-8' });
-        core.info('Committed and pushed footprint update.');
+        core.info('No cached footprints found. This is normal on first run.');
+        return false;
     }
     catch (err) {
-        core.warning(`Failed to commit footprints: ${err.message}`);
-        core.warning('The store step completed but could not persist footprints. ' +
-            'Ensure the github-token has contents:write permission and the checkout used fetch-depth: 0.');
+        core.warning(`Failed to restore cache: ${err.message}`);
+        return false;
+    }
+}
+/**
+ * Save footprints to the GitHub Actions cache.
+ * Uses a unique key per save so updates always persist (cache is immutable
+ * per key, so we append a timestamp to make each save unique).
+ */
+async function saveFootprintsCache() {
+    try {
+        const uniqueKey = `${CACHE_KEY}-${Date.now()}`;
+        await cache.saveCache([FOOTPRINTS_PATH], uniqueKey);
+        core.info(`Saved footprints to cache (key: ${uniqueKey}).`);
+    }
+    catch (err) {
+        // cache.saveCache throws if key already exists — not a problem
+        if (err.message?.includes('already exists')) {
+            core.info('Cache already up to date.');
+        }
+        else {
+            core.warning(`Failed to save cache: ${err.message}`);
+        }
     }
 }
 async function handlePush() {
@@ -150,6 +155,8 @@ async function handlePush() {
         core.info('This is normal for direct pushes that are not PR merges.');
         return;
     }
+    // Restore existing footprints from cache before adding new ones
+    await restoreFootprintsCache();
     // Extract metadata from the push event payload
     const payload = github.context.payload;
     const author = payload.head_commit?.author?.username ?? payload.sender?.login ?? 'unknown';
@@ -165,13 +172,13 @@ async function handlePush() {
         twoDot: true,
     });
     core.info(`Stored: ${result.symbolsAdded} symbol(s) added, ${result.symbolsReferenced} symbol(s) referenced`);
-    // Prune old footprints to keep the file small
+    // Prune old footprints to keep the cache small
     const pruned = (0, store_1.pruneOldFootprints)(lookbackDays);
     if (pruned > 0) {
         core.info(`Pruned ${pruned} expired footprint(s) older than ${lookbackDays} days.`);
     }
-    // Commit and push the updated footprints file
-    commitAndPushFootprints(baseBranch);
+    // Save updated footprints to cache
+    await saveFootprintsCache();
     core.setOutput('mode', 'store');
     core.setOutput('pr-number', prNumber);
 }
@@ -186,6 +193,8 @@ async function handlePullRequest() {
         return;
     }
     const { owner, repo } = github.context.repo;
+    // Restore footprints from cache before checking
+    await restoreFootprintsCache();
     core.info(`Checking PR #${prNumber} for semantic regressions...`);
     const { regressions } = await (0, core_1.runCheck)({ base: remoteRef(baseBranch), lookbackDays });
     // Log results to the Actions console

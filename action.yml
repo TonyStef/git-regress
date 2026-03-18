@@ -5,7 +5,7 @@ branding:
   color: 'orange'
 inputs:
   github-token:
-    description: 'GitHub token for posting PR comments and committing footprints. Needs contents:write and pull-requests:write.'
+    description: 'GitHub token for posting PR comments. Needs pull-requests:write.'
     required: true
   lookback-days:
     description: 'Number of days to look back for recently merged PRs (default: 14)'

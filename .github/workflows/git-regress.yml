@@ -9,8 +9,8 @@ jobs:
   regress:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      pull-requests: write
+      contents: read         # needed to checkout and read the repo
+      pull-requests: write   # needed to post PR comments
     steps:
       - uses: actions/checkout@v4
         with:

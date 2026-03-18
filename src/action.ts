@@ -1,12 +1,14 @@
+import * as cache from '@actions/cache';
 import * as core from '@actions/core';
 import * as github from '@actions/github';
-import { execSync } from 'child_process';
 import { runCheck, runStore } from './core';
 import { pruneOldFootprints } from './graph/store';
 import { formatRegressions } from './reporter/cli';
 import { postPRComment } from './reporter/github';
 
 const LOOKBACK_DEFAULT = 14;
+const CACHE_KEY = 'git-regress-footprints';
+const FOOTPRINTS_PATH = '.git-regress';
 
 /**
  * In GitHub Actions, `actions/checkout` checks out a detached HEAD (the merge
@@ -64,48 +66,42 @@ async function resolvePRNumber(token: string): Promise<number | null> {
 }
 
 /**
- * Commit and push the footprints file back to the repo.
- * Uses the github-token for authentication. Adds [skip ci] to avoid
- * triggering infinite workflow loops.
+ * Restore footprints from the GitHub Actions cache.
+ * The cache is shared across all branches in the repo.
+ * Returns true if cache was found, false otherwise.
  */
-function commitAndPushFootprints(baseBranch: string): void {
-  const storePath = '.git-regress/footprints.json';
-
+async function restoreFootprintsCache(): Promise<boolean> {
   try {
-    // Check if the footprints file exists on disk. It may be gitignored,
-    // so `git status --porcelain` won't show it. Check the filesystem directly.
-    const fs = require('fs') as typeof import('fs');
-    if (!fs.existsSync(storePath)) {
-      core.info('No footprints file found, skipping commit.');
-      return;
+    const hitKey = await cache.restoreCache([FOOTPRINTS_PATH], CACHE_KEY, [CACHE_KEY]);
+    if (hitKey) {
+      core.info(`Restored footprints from cache (key: ${hitKey}).`);
+      return true;
     }
-
-    // Configure git identity for the commit
-    execSync('git config user.name "git-regress[bot]"', { encoding: 'utf-8' });
-    execSync('git config user.email "git-regress[bot]@users.noreply.github.com"', { encoding: 'utf-8' });
-
-    // Use --force to add the file even if it's in .gitignore
-    execSync(`git add --force "${storePath}"`, { encoding: 'utf-8' });
-
-    // Check if there are staged changes (file might already be committed with same content)
-    const staged = execSync('git diff --cached --name-only', { encoding: 'utf-8' }).trim();
-    if (!staged) {
-      core.info('Footprints file unchanged, skipping commit.');
-      return;
-    }
-    execSync('git commit -m "chore: update git-regress footprints [skip ci]"', { encoding: 'utf-8' });
-
-    // Push using the token. The checkout action sets up the remote with the token
-    // when fetch-depth: 0 is used, so a plain push works.
-    execSync(`git push origin HEAD:${baseBranch}`, { encoding: 'utf-8' });
-
-    core.info('Committed and pushed footprint update.');
+    core.info('No cached footprints found. This is normal on first run.');
+    return false;
   } catch (err: unknown) {
-    core.warning(`Failed to commit footprints: ${(err as Error).message}`);
-    core.warning(
-      'The store step completed but could not persist footprints. ' +
-        'Ensure the github-token has contents:write permission and the checkout used fetch-depth: 0.',
-    );
+    core.warning(`Failed to restore cache: ${(err as Error).message}`);
+    return false;
+  }
+}
+
+/**
+ * Save footprints to the GitHub Actions cache.
+ * Uses a unique key per save so updates always persist (cache is immutable
+ * per key, so we append a timestamp to make each save unique).
+ */
+async function saveFootprintsCache(): Promise<void> {
+  try {
+    const uniqueKey = `${CACHE_KEY}-${Date.now()}`;
+    await cache.saveCache([FOOTPRINTS_PATH], uniqueKey);
+    core.info(`Saved footprints to cache (key: ${uniqueKey}).`);
+  } catch (err: unknown) {
+    // cache.saveCache throws if key already exists — not a problem
+    if ((err as Error).message?.includes('already exists')) {
+      core.info('Cache already up to date.');
+    } else {
+      core.warning(`Failed to save cache: ${(err as Error).message}`);
+    }
   }
 }
 
@@ -129,6 +125,9 @@ async function handlePush(): Promise<void> {
     return;
   }
 
+  // Restore existing footprints from cache before adding new ones
+  await restoreFootprintsCache();
+
   // Extract metadata from the push event payload
   const payload = github.context.payload;
   const author = payload.head_commit?.author?.username ?? payload.sender?.login ?? 'unknown';
@@ -148,14 +147,14 @@ async function handlePush(): Promise<void> {
 
   core.info(`Stored: ${result.symbolsAdded} symbol(s) added, ${result.symbolsReferenced} symbol(s) referenced`);
 
-  // Prune old footprints to keep the file small
+  // Prune old footprints to keep the cache small
   const pruned = pruneOldFootprints(lookbackDays);
   if (pruned > 0) {
     core.info(`Pruned ${pruned} expired footprint(s) older than ${lookbackDays} days.`);
   }
 
-  // Commit and push the updated footprints file
-  commitAndPushFootprints(baseBranch);
+  // Save updated footprints to cache
+  await saveFootprintsCache();
 
   core.setOutput('mode', 'store');
   core.setOutput('pr-number', prNumber);
@@ -174,6 +173,9 @@ async function handlePullRequest(): Promise<void> {
   }
 
   const { owner, repo } = github.context.repo;
+
+  // Restore footprints from cache before checking
+  await restoreFootprintsCache();
 
   core.info(`Checking PR #${prNumber} for semantic regressions...`);
 

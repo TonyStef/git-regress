@@ -39,7 +39,7 @@ This may silently break functionality from those PRs. Please verify.
 
 Add a single workflow file to your repo. The action auto-detects the event type:
 
-- **On `push` to main** (PR merge) → stores the merged PR's symbol footprint, commits it back to the repo
+- **On `push` to main** (PR merge) → stores the merged PR's symbol footprint in the GitHub Actions cache
 - **On `pull_request`** → checks the PR for regressions, posts a comment if issues are found
 
 ```yaml
@@ -54,7 +54,7 @@ jobs:
   regress:
     runs-on: ubuntu-latest
     permissions:
-      contents: write        # needed to commit footprints on merge
+      contents: read         # needed to checkout and read the repo
       pull-requests: write   # needed to post PR comments
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,7 @@ That's it. One step, fully automatic.
 
 | Input | Default | Description |
 |---|---|---|
-| `github-token` | **(required)** | GitHub token with `contents:write` and `pull-requests:write` permissions |
+| `github-token` | **(required)** | GitHub token with `pull-requests:write` permission |
 | `base-branch` | `main` | Base branch to compare against |
 | `lookback-days` | `14` | How many days back to check for recently merged PRs |
 | `mode` | *(auto)* | Force `check` or `store` mode. Leave empty to auto-detect from event type. |
@@ -88,14 +88,15 @@ That's it. One step, fully automatic.
 
 ### How storage works
 
-Footprints are stored in `.git-regress/footprints.json` in your repo. When a PR merges, the action:
+Footprints are persisted using the **GitHub Actions cache**. No files are committed to your repo, no branch protection rules are affected.
 
-1. Parses the merge diff to extract the symbol footprint
-2. Saves it to `.git-regress/footprints.json`
-3. Commits the file with `git-regress[bot]` as author and `[skip ci]` to avoid trigger loops
-4. Pushes back to the base branch
+When a PR merges, the action:
 
-Old footprints beyond the lookback window are automatically pruned to keep the file small.
+1. Restores existing footprints from the cache
+2. Parses the merge diff to extract the symbol footprint
+3. Saves the updated footprints back to the cache
+
+Old footprints beyond the lookback window are automatically pruned to keep the cache small. Works with any branch protection setup — no `contents:write` permission needed.
 
 ### Using outputs
 
