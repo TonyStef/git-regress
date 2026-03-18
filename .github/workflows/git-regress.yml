@@ -1,0 +1,20 @@
+name: git-regress
+on:
+  pull_request:
+    types: [opened, synchronize]
+  push:
+    branches: [main]
+
+jobs:
+  regress:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: TonyStef/git-regress@main
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
