@@ -70,6 +70,18 @@ export async function parseFile(source: string, language: 'typescript' | 'tsx'):
         const imp = parseImportStatement(child);
         if (imp) imports.push(imp);
       }
+      // Re-exports (export { x } from './bar') are import references
+      if (child.type === 'export_statement') {
+        const reExport = parseReExport(child);
+        if (reExport) imports.push(reExport);
+      }
+    }
+
+    // Resolve namespace import member accesses (import * as x from './y')
+    const nsImports = collectNamespaceImports(tree.rootNode);
+    if (nsImports.size > 0) {
+      const memberImports = resolveNamespaceMembers(tree.rootNode, nsImports);
+      imports.push(...memberImports);
     }
 
     return { symbols, imports };
@@ -128,6 +140,13 @@ function visitNode(node: Node, symbols: ExtractedSymbol[], exported: boolean): v
 }
 
 function handleExportStatement(node: Node, symbols: ExtractedSymbol[]): void {
+  // Skip re-exports (export { x } from './bar') — handled as imports in parseFile
+  const sourceNode = node.namedChildren.find((c) => c.type === 'string');
+  if (sourceNode) {
+    const source = sourceNode.text.replace(/['"]/g, '');
+    if (source.startsWith('.')) return;
+  }
+
   const exportClause = node.namedChildren.find((c) => c.type === 'export_clause');
   if (exportClause) {
     for (const spec of exportClause.namedChildren) {
@@ -252,17 +271,96 @@ function collectImportNames(clause: Node, names: string[]): void {
       case 'named_imports':
         for (const spec of child.namedChildren) {
           if (spec.type === 'import_specifier') {
-            const localName = (spec.childForFieldName('alias') ?? spec.childForFieldName('name'))?.text;
+            const localName = spec.childForFieldName('name')?.text;
             if (localName) names.push(localName);
           }
         }
         break;
-      case 'namespace_import': {
-        const id = child.namedChildren.find((c) => c.type === 'identifier');
-        if (id) names.push(id.text);
-        break;
+      // namespace_import (import * as x) is resolved via member expression
+      // analysis in parseFile — skip here to avoid tracking the namespace
+      // identifier as a symbol name
+    }
+  }
+}
+
+function parseReExport(node: Node): ExtractedImport | null {
+  const sourceNode = node.namedChildren.find((c) => c.type === 'string');
+  if (!sourceNode) return null;
+  const source = sourceNode.text.replace(/['"]/g, '');
+  if (!source.startsWith('.')) return null;
+
+  const names: string[] = [];
+  const exportClause = node.namedChildren.find((c) => c.type === 'export_clause');
+  if (exportClause) {
+    for (const spec of exportClause.namedChildren) {
+      if (spec.type === 'export_specifier') {
+        const nameNode = spec.childForFieldName('name');
+        if (nameNode) names.push(nameNode.text);
       }
     }
+  }
+  // export * from './foo' — can't enumerate individual symbols without reading the source file
+  if (names.length === 0) return null;
+  return { names, source, line: node.startPosition.row + 1 };
+}
+
+function collectNamespaceImports(root: Node): Map<string, { source: string; line: number }> {
+  const nsImports = new Map<string, { source: string; line: number }>();
+  for (const child of root.namedChildren) {
+    if (child.type !== 'import_statement') continue;
+    const sourceNode = child.namedChildren.find((c) => c.type === 'string');
+    if (!sourceNode) continue;
+    const source = sourceNode.text.replace(/['"]/g, '');
+    if (!source.startsWith('.')) continue;
+
+    for (const clause of child.namedChildren) {
+      if (clause.type !== 'import_clause') continue;
+      for (const sub of clause.namedChildren) {
+        if (sub.type === 'namespace_import') {
+          const id = sub.namedChildren.find((c) => c.type === 'identifier');
+          if (id) nsImports.set(id.text, { source, line: child.startPosition.row + 1 });
+        }
+      }
+    }
+  }
+  return nsImports;
+}
+
+function resolveNamespaceMembers(
+  root: Node,
+  nsImports: Map<string, { source: string; line: number }>,
+): ExtractedImport[] {
+  const membersBySource = new Map<string, { names: Set<string>; line: number; source: string }>();
+  walkMemberExpressions(root, nsImports, membersBySource);
+  return Array.from(membersBySource.values()).map(({ names, source, line }) => ({
+    names: Array.from(names),
+    source,
+    line,
+  }));
+}
+
+function walkMemberExpressions(
+  node: Node,
+  nsImports: Map<string, { source: string; line: number }>,
+  results: Map<string, { names: Set<string>; line: number; source: string }>,
+): void {
+  if (node.type === 'member_expression') {
+    const object = node.childForFieldName('object');
+    const property = node.childForFieldName('property');
+    if (object?.type === 'identifier' && property) {
+      const nsInfo = nsImports.get(object.text);
+      if (nsInfo) {
+        let entry = results.get(nsInfo.source);
+        if (!entry) {
+          entry = { names: new Set(), line: nsInfo.line, source: nsInfo.source };
+          results.set(nsInfo.source, entry);
+        }
+        entry.names.add(property.text);
+      }
+    }
+  }
+  for (const child of node.namedChildren) {
+    walkMemberExpressions(child, nsImports, results);
   }
 }
 
