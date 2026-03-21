@@ -35,8 +35,8 @@ export function detectRegressions(
   return regressions;
 }
 
-function symbolMatches(stored: SymbolRef, target: SymbolRef): boolean {
-  return stored.name === target.name && stored.file === target.file && stored.kind === target.kind;
+function symbolMatches(stored: SymbolRef, target: SymbolRef, ignoreKind = false): boolean {
+  return stored.name === target.name && stored.file === target.file && (ignoreKind || stored.kind === target.kind);
 }
 
 function findAffectedPRs(symbol: SymbolRef, footprints: PRFootprint[]): RegressionMatch[] {
@@ -49,7 +49,7 @@ function findAffectedPRs(symbol: SymbolRef, footprints: PRFootprint[]): Regressi
       continue;
     }
 
-    const wasReferenced = fp.symbols_referenced.some((s) => symbolMatches(s, symbol));
+    const wasReferenced = fp.symbols_referenced.some((s) => symbolMatches(s, symbol, true));
     if (wasReferenced) {
       matches.push({ pr: fp, relationship: 'referenced' });
     }

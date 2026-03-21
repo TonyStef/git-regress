@@ -88,7 +88,7 @@ describe('detectRegressions', () => {
     expect(regressions).toHaveLength(0);
   });
 
-  it('does not match symbols with same name but different kind', () => {
+  it('does not match symbols_added with same name but different kind', () => {
     const footprint = makeFootprint({
       symbols_added: [makeSymbol({ name: 'Config', kind: 'type' })],
     });
@@ -97,6 +97,19 @@ describe('detectRegressions', () => {
 
     const regressions = detectRegressions(deleted, [], [footprint]);
     expect(regressions).toHaveLength(0);
+  });
+
+  it('ignores kind mismatch when matching symbols_referenced (bug #4)', () => {
+    const footprint = makeFootprint({
+      symbols_referenced: [makeSymbol({ name: 'formatDate', kind: 'variable' })],
+    });
+
+    // The actual deleted symbol is a function, but the reference was stored as 'variable'
+    const deleted = [makeSymbol({ name: 'formatDate', kind: 'function' })];
+
+    const regressions = detectRegressions(deleted, [], [footprint]);
+    expect(regressions).toHaveLength(1);
+    expect(regressions[0].affectedPRs[0].relationship).toBe('referenced');
   });
 
   it('prefers added over referenced when a PR both adds and references', () => {
