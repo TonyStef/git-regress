@@ -17,4 +17,3 @@ export interface ParsedFile {
 }
 export declare function parseFile(source: string, language: 'typescript' | 'tsx'): Promise<ParsedFile>;
 export declare function extractSymbols(source: string, language: 'typescript' | 'tsx'): Promise<ExtractedSymbol[]>;
-export declare function resolveImportPath(importerFile: string, importSource: string): string;

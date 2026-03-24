@@ -19,6 +19,9 @@ inputs:
   pr-number:
     description: 'PR number (auto-detected from event payload in most cases)'
     default: ''
+  tsconfig-path:
+    description: 'Path to tsconfig.json (auto-detected if not set)'
+    default: ''
 outputs:
   mode:
     description: 'The mode that was executed: "store" or "check"'

@@ -1,12 +1,13 @@
 import { getLanguage, isSupportedFile, loadConfig } from './config';
-import { getAuthorName, getDiff, getDiffTwoDot, getFileAtRef, getLastCommitMessage } from './git';
+import { getAuthorName, getDiff, getDiffTwoDot, getFileAtRef, getLastCommitMessage, getRepoRoot } from './git';
 import type { Regression } from './graph/detect';
 import { detectRegressions } from './graph/detect';
 import type { PRFootprint, SymbolRef } from './graph/footprint';
 import { addFootprint, getRecentFootprints } from './graph/store';
-import { type ExtractedSymbol, extractSymbols, parseFile, resolveImportPath } from './parser/ast';
+import { type ExtractedSymbol, extractSymbols, parseFile } from './parser/ast';
 import type { DiffFile } from './parser/diff';
 import { getAddedLineNumbers, parseDiff } from './parser/diff';
+import { canonicalizePath, createResolver } from './resolve';
 
 export interface StoreOptions {
   pr: number;
@@ -16,6 +17,7 @@ export interface StoreOptions {
   title?: string;
   mergedAt?: string;
   twoDot?: boolean;
+  tsconfigPath?: string;
 }
 
 export interface StoreResult {
@@ -27,6 +29,7 @@ export interface StoreResult {
 export interface CheckOptions {
   base: string;
   lookbackDays: number;
+  tsconfigPath?: string;
 }
 
 export interface CheckResult {
@@ -57,6 +60,7 @@ export async function runStore(opts: StoreOptions): Promise<StoreResult> {
   const author = opts.author || getAuthorName();
   const title = opts.title || getLastCommitMessage();
   const mergedAt = opts.mergedAt || new Date().toISOString();
+  const resolver = createResolver(getRepoRoot(), opts.tsconfigPath);
 
   const raw = opts.twoDot ? getDiffTwoDot(base, head) : getDiff(base, head);
   const supported = filterSupported(parseDiff(raw));
@@ -75,13 +79,14 @@ export async function runStore(opts: StoreOptions): Promise<StoreResult> {
 
     for (const sym of symbols) {
       if (addedLines.has(sym.line)) {
-        symbolsAdded.push(toRef(sym, filePath));
+        symbolsAdded.push(toRef(sym, canonicalizePath(filePath)));
       }
     }
 
     for (const imp of imports) {
       if (addedLines.has(imp.line)) {
-        const resolvedFile = resolveImportPath(filePath, imp.source);
+        const resolvedFile = resolver.resolve(filePath, imp.source);
+        if (!resolvedFile) continue;
         for (const name of imp.names) {
           symbolsReferenced.push({ name, file: resolvedFile, kind: 'variable' });
         }
@@ -126,7 +131,7 @@ export async function runCheck(opts: CheckOptions): Promise<CheckResult> {
       if (!oldSource) continue;
       const oldSymbols = await extractSymbols(oldSource, getLanguage(filePath));
       for (const sym of oldSymbols) {
-        deletedSymbols.push(toRef(sym, filePath));
+        deletedSymbols.push(toRef(sym, canonicalizePath(filePath)));
       }
       continue;
     }
@@ -149,12 +154,12 @@ export async function runCheck(opts: CheckOptions): Promise<CheckResult> {
     for (const oldSym of oldSymbols) {
       const key = `${oldSym.name}:${oldSym.kind}`;
       const newSym = newSymbolMap.get(key);
-      const canonicalPath = file.newPath ?? file.oldPath!;
+      const canonical = canonicalizePath(file.newPath ?? file.oldPath!);
 
       if (!newSym) {
-        deletedSymbols.push(toRef(oldSym, canonicalPath));
+        deletedSymbols.push(toRef(oldSym, canonical));
       } else if (oldSym.signature && newSym.signature && oldSym.signature !== newSym.signature) {
-        modifiedSymbols.push(toRef(oldSym, canonicalPath));
+        modifiedSymbols.push(toRef(oldSym, canonical));
       }
     }
   }

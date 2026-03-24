@@ -135,6 +135,8 @@ async function handlePush(): Promise<void> {
 
   core.info(`Storing footprint for PR #${prNumber}...`);
 
+  const tsconfigPath = core.getInput('tsconfig-path') || undefined;
+
   const result = await runStore({
     pr: prNumber,
     base: `${remoteRef(baseBranch)}~1`,
@@ -143,6 +145,7 @@ async function handlePush(): Promise<void> {
     title,
     mergedAt: new Date().toISOString(),
     twoDot: true,
+    tsconfigPath,
   });
 
   core.info(`Stored: ${result.symbolsAdded} symbol(s) added, ${result.symbolsReferenced} symbol(s) referenced`);
@@ -179,7 +182,9 @@ async function handlePullRequest(): Promise<void> {
 
   core.info(`Checking PR #${prNumber} for semantic regressions...`);
 
-  const { regressions } = await runCheck({ base: remoteRef(baseBranch), lookbackDays });
+  const tsconfigPath = core.getInput('tsconfig-path') || undefined;
+
+  const { regressions } = await runCheck({ base: remoteRef(baseBranch), lookbackDays, tsconfigPath });
 
   // Log results to the Actions console
   core.info(formatRegressions(regressions));

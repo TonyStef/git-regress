@@ -38,6 +38,7 @@ if (process.env.GITHUB_ACTIONS === 'true') {
     .option('--title <text>', 'PR title')
     .option('--merged-at <iso>', 'PR merge timestamp (ISO 8601)')
     .option('--two-dot', 'Use two-dot diff (base..head) instead of three-dot (base...head)')
+    .option('--tsconfig <path>', 'Path to tsconfig.json (auto-detected if not set)')
     .action(
       async (opts: {
         pr: string;
@@ -47,6 +48,7 @@ if (process.env.GITHUB_ACTIONS === 'true') {
         title?: string;
         mergedAt?: string;
         twoDot?: boolean;
+        tsconfig?: string;
       }) => {
         try {
           const prNumber = parseIntOrFail(opts.pr, '--pr');
@@ -58,6 +60,7 @@ if (process.env.GITHUB_ACTIONS === 'true') {
             title: opts.title,
             mergedAt: opts.mergedAt,
             twoDot: opts.twoDot,
+            tsconfigPath: opts.tsconfig,
           });
 
           console.log(`Stored footprint for PR #${prNumber}`);
@@ -78,6 +81,7 @@ if (process.env.GITHUB_ACTIONS === 'true') {
     .option('--owner <owner>', 'GitHub repo owner')
     .option('--repo <repo>', 'GitHub repo name')
     .option('--pr <number>', 'PR number for GitHub comment')
+    .option('--tsconfig <path>', 'Path to tsconfig.json (auto-detected if not set)')
     .action(
       async (opts: {
         base: string;
@@ -86,10 +90,11 @@ if (process.env.GITHUB_ACTIONS === 'true') {
         owner?: string;
         repo?: string;
         pr?: string;
+        tsconfig?: string;
       }) => {
         try {
           const lookbackDays = parseIntOrFail(opts.lookback, '--lookback');
-          const { regressions } = await runCheck({ base: opts.base, lookbackDays });
+          const { regressions } = await runCheck({ base: opts.base, lookbackDays, tsconfigPath: opts.tsconfig });
 
           console.log(formatRegressions(regressions));
 

@@ -8,6 +8,7 @@ const detect_1 = require("./graph/detect");
 const store_1 = require("./graph/store");
 const ast_1 = require("./parser/ast");
 const diff_1 = require("./parser/diff");
+const resolve_1 = require("./resolve");
 function filterSupported(files) {
     const config = (0, config_1.loadConfig)();
     return files.filter((f) => {
@@ -28,6 +29,7 @@ async function runStore(opts) {
     const author = opts.author || (0, git_1.getAuthorName)();
     const title = opts.title || (0, git_1.getLastCommitMessage)();
     const mergedAt = opts.mergedAt || new Date().toISOString();
+    const resolver = (0, resolve_1.createResolver)((0, git_1.getRepoRoot)(), opts.tsconfigPath);
     const raw = opts.twoDot ? (0, git_1.getDiffTwoDot)(base, head) : (0, git_1.getDiff)(base, head);
     const supported = filterSupported((0, diff_1.parseDiff)(raw));
     const symbolsAdded = [];
@@ -42,12 +44,14 @@ async function runStore(opts) {
         const { symbols, imports } = await (0, ast_1.parseFile)(source, lang);
         for (const sym of symbols) {
             if (addedLines.has(sym.line)) {
-                symbolsAdded.push(toRef(sym, filePath));
+                symbolsAdded.push(toRef(sym, (0, resolve_1.canonicalizePath)(filePath)));
             }
         }
         for (const imp of imports) {
             if (addedLines.has(imp.line)) {
-                const resolvedFile = (0, ast_1.resolveImportPath)(filePath, imp.source);
+                const resolvedFile = resolver.resolve(filePath, imp.source);
+                if (!resolvedFile)
+                    continue;
                 for (const name of imp.names) {
                     symbolsReferenced.push({ name, file: resolvedFile, kind: 'variable' });
                 }
@@ -86,7 +90,7 @@ async function runCheck(opts) {
                 continue;
             const oldSymbols = await (0, ast_1.extractSymbols)(oldSource, (0, config_1.getLanguage)(filePath));
             for (const sym of oldSymbols) {
-                deletedSymbols.push(toRef(sym, filePath));
+                deletedSymbols.push(toRef(sym, (0, resolve_1.canonicalizePath)(filePath)));
             }
             continue;
         }
@@ -106,12 +110,12 @@ async function runCheck(opts) {
         for (const oldSym of oldSymbols) {
             const key = `${oldSym.name}:${oldSym.kind}`;
             const newSym = newSymbolMap.get(key);
-            const canonicalPath = file.newPath ?? file.oldPath;
+            const canonical = (0, resolve_1.canonicalizePath)(file.newPath ?? file.oldPath);
             if (!newSym) {
-                deletedSymbols.push(toRef(oldSym, canonicalPath));
+                deletedSymbols.push(toRef(oldSym, canonical));
             }
             else if (oldSym.signature && newSym.signature && oldSym.signature !== newSym.signature) {
-                modifiedSymbols.push(toRef(oldSym, canonicalPath));
+                modifiedSymbols.push(toRef(oldSym, canonical));
             }
         }
     }
