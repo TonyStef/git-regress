@@ -172,6 +172,97 @@ describe('integration: full regression detection scenario', () => {
     expect(checkResult.stdout).toContain('No semantic regressions detected');
   });
 
+  it('does not flag partial removal of merged declarations as deletion', () => {
+    run('git checkout main', repoDir);
+    const addBranch = 'pr-50';
+    run(`git checkout -b ${addBranch}`, repoDir);
+
+    fs.writeFileSync(
+      path.join(repoDir, 'merged.ts'),
+      [
+        'export interface Config {',
+        '  name: string;',
+        '}',
+        '',
+        'export interface Config {',
+        '  age: number;',
+        '}',
+        '',
+      ].join('\n'),
+    );
+
+    run('git add -A && git commit -m "Add merged interface"', repoDir);
+    runCli(`store --pr 50 --base main --head ${addBranch}`, repoDir);
+
+    run('git checkout main', repoDir);
+    run(`git merge ${addBranch} --no-ff -m "Merge PR #50"`, repoDir);
+
+    // PR #51 removes one declaration but keeps the other
+    const removeBranch = 'pr-51';
+    run(`git checkout -b ${removeBranch}`, repoDir);
+
+    fs.writeFileSync(
+      path.join(repoDir, 'merged.ts'),
+      ['export interface Config {', '  name: string;', '}', ''].join('\n'),
+    );
+
+    run('git add -A && git commit -m "Remove second Config declaration"', repoDir);
+
+    const checkResult = runCli('check --base main', repoDir);
+    // Should flag as modified (signature changed), NOT as deleted
+    expect(checkResult.stdout).not.toContain('deletes');
+    // Config still exists, so the check should detect modification not deletion
+    expect(checkResult.stdout).toContain('Config');
+    expect(checkResult.stdout).toContain('modifies');
+  });
+
+  it('ignores overload signature removal when implementation survives', () => {
+    run('git checkout main', repoDir);
+    const addBranch = 'pr-60';
+    run(`git checkout -b ${addBranch}`, repoDir);
+
+    fs.writeFileSync(
+      path.join(repoDir, 'overloads.ts'),
+      [
+        'export function parse(input: string): number;',
+        'export function parse(input: number): string;',
+        'export function parse(input: string | number): number | string {',
+        '  return typeof input === "string" ? input.length : String(input);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+
+    run('git add -A && git commit -m "Add overloaded parse"', repoDir);
+    runCli(`store --pr 60 --base main --head ${addBranch}`, repoDir);
+
+    run('git checkout main', repoDir);
+    run(`git merge ${addBranch} --no-ff -m "Merge PR #60"`, repoDir);
+
+    // PR #61 removes one overload signature but keeps the implementation
+    const removeBranch = 'pr-61';
+    run(`git checkout -b ${removeBranch}`, repoDir);
+
+    fs.writeFileSync(
+      path.join(repoDir, 'overloads.ts'),
+      [
+        'export function parse(input: string): number;',
+        'export function parse(input: string | number): number | string {',
+        '  return typeof input === "string" ? input.length : String(input);',
+        '}',
+        '',
+      ].join('\n'),
+    );
+
+    run('git add -A && git commit -m "Remove one overload"', repoDir);
+
+    const checkResult = runCli('check --base main', repoDir);
+    // Tree-sitter only extracts the implementation function (not signature-only
+    // overloads), so removing a signature doesn't change the extracted symbol.
+    // The implementation is unchanged → no regression.
+    expect(checkResult.exitCode).toBe(0);
+  });
+
   it('detects deletion of a referenced import', () => {
     run('git checkout main', repoDir);
 

@@ -19,6 +19,33 @@ function filterSupported(files) {
 function toRef(sym, file) {
     return { name: sym.name, file, kind: sym.kind };
 }
+function groupByKey(symbols) {
+    const groups = new Map();
+    for (const sym of symbols) {
+        const key = `${sym.name}:${sym.kind}`;
+        const group = groups.get(key);
+        if (group)
+            group.push(sym);
+        else
+            groups.set(key, [sym]);
+    }
+    return groups;
+}
+function hasSignatureChange(oldGroup, newGroup) {
+    const oldSigs = oldGroup
+        .map((s) => s.signature)
+        .filter(Boolean)
+        .sort();
+    const newSigs = newGroup
+        .map((s) => s.signature)
+        .filter(Boolean)
+        .sort();
+    if (oldSigs.length === 0 || newSigs.length === 0)
+        return false;
+    if (oldSigs.length !== newSigs.length)
+        return true;
+    return oldSigs.some((sig, i) => sig !== newSigs[i]);
+}
 /**
  * Store a symbol footprint for a merged PR.
  * Shared by CLI and GitHub Action entry points.
@@ -89,8 +116,9 @@ async function runCheck(opts) {
             if (!oldSource)
                 continue;
             const oldSymbols = await (0, ast_1.extractSymbols)(oldSource, (0, config_1.getLanguage)(filePath));
-            for (const sym of oldSymbols) {
-                deletedSymbols.push(toRef(sym, (0, resolve_1.canonicalizePath)(filePath)));
+            const canonical = (0, resolve_1.canonicalizePath)(filePath);
+            for (const [, group] of groupByKey(oldSymbols)) {
+                deletedSymbols.push(toRef(group[0], canonical));
             }
             continue;
         }
@@ -103,19 +131,16 @@ async function runCheck(opts) {
         const lang = (0, config_1.getLanguage)(file.newPath);
         const oldSymbols = await (0, ast_1.extractSymbols)(oldSource, lang);
         const newSymbols = await (0, ast_1.extractSymbols)(newSource, lang);
-        const newSymbolMap = new Map();
-        for (const sym of newSymbols) {
-            newSymbolMap.set(`${sym.name}:${sym.kind}`, sym);
-        }
-        for (const oldSym of oldSymbols) {
-            const key = `${oldSym.name}:${oldSym.kind}`;
-            const newSym = newSymbolMap.get(key);
-            const canonical = (0, resolve_1.canonicalizePath)(file.newPath ?? file.oldPath);
-            if (!newSym) {
-                deletedSymbols.push(toRef(oldSym, canonical));
+        const canonical = (0, resolve_1.canonicalizePath)(file.newPath ?? file.oldPath);
+        const oldGroups = groupByKey(oldSymbols);
+        const newGroups = groupByKey(newSymbols);
+        for (const [key, oldGroup] of oldGroups) {
+            const newGroup = newGroups.get(key);
+            if (!newGroup) {
+                deletedSymbols.push(toRef(oldGroup[0], canonical));
             }
-            else if (oldSym.signature && newSym.signature && oldSym.signature !== newSym.signature) {
-                modifiedSymbols.push(toRef(oldSym, canonical));
+            else if (hasSignatureChange(oldGroup, newGroup)) {
+                modifiedSymbols.push(toRef(oldGroup[0], canonical));
             }
         }
     }
