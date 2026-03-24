@@ -162,6 +162,7 @@ async function handlePush() {
     const author = payload.head_commit?.author?.username ?? payload.sender?.login ?? 'unknown';
     const title = payload.head_commit?.message?.split('\n')[0] ?? '';
     core.info(`Storing footprint for PR #${prNumber}...`);
+    const tsconfigPath = core.getInput('tsconfig-path') || undefined;
     const result = await (0, core_1.runStore)({
         pr: prNumber,
         base: `${remoteRef(baseBranch)}~1`,
@@ -170,6 +171,7 @@ async function handlePush() {
         title,
         mergedAt: new Date().toISOString(),
         twoDot: true,
+        tsconfigPath,
     });
     core.info(`Stored: ${result.symbolsAdded} symbol(s) added, ${result.symbolsReferenced} symbol(s) referenced`);
     // Prune old footprints to keep the cache small
@@ -196,7 +198,8 @@ async function handlePullRequest() {
     // Restore footprints from cache before checking
     await restoreFootprintsCache();
     core.info(`Checking PR #${prNumber} for semantic regressions...`);
-    const { regressions } = await (0, core_1.runCheck)({ base: remoteRef(baseBranch), lookbackDays });
+    const tsconfigPath = core.getInput('tsconfig-path') || undefined;
+    const { regressions } = await (0, core_1.runCheck)({ base: remoteRef(baseBranch), lookbackDays, tsconfigPath });
     // Log results to the Actions console
     core.info((0, cli_1.formatRegressions)(regressions));
     // Post or update PR comment (also cleans up stale warnings)

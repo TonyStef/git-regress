@@ -36,6 +36,7 @@
     "@actions/github": "6.0.1",
     "@octokit/rest": "^22.0.1",
     "commander": "^14.0.3",
+    "get-tsconfig": "^4.13.7",
     "tree-sitter-wasms": "^0.1.13",
     "web-tree-sitter": "0.24.7"
   },

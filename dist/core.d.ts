@@ -8,6 +8,7 @@ export interface StoreOptions {
     title?: string;
     mergedAt?: string;
     twoDot?: boolean;
+    tsconfigPath?: string;
 }
 export interface StoreResult {
     symbolsAdded: number;
@@ -17,6 +18,7 @@ export interface StoreResult {
 export interface CheckOptions {
     base: string;
     lookbackDays: number;
+    tsconfigPath?: string;
 }
 export interface CheckResult {
     regressions: Regression[];

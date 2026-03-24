@@ -17,8 +17,8 @@ function detectRegressions(deletedSymbols, modifiedSymbols, footprints) {
     }
     return regressions;
 }
-function symbolMatches(stored, target) {
-    return stored.name === target.name && stored.file === target.file && stored.kind === target.kind;
+function symbolMatches(stored, target, ignoreKind = false) {
+    return stored.name === target.name && stored.file === target.file && (ignoreKind || stored.kind === target.kind);
 }
 function findAffectedPRs(symbol, footprints) {
     const matches = [];
@@ -28,7 +28,7 @@ function findAffectedPRs(symbol, footprints) {
             matches.push({ pr: fp, relationship: 'added' });
             continue;
         }
-        const wasReferenced = fp.symbols_referenced.some((s) => symbolMatches(s, symbol));
+        const wasReferenced = fp.symbols_referenced.some((s) => symbolMatches(s, symbol, true));
         if (wasReferenced) {
             matches.push({ pr: fp, relationship: 'referenced' });
         }

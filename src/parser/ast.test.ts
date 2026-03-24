@@ -62,6 +62,52 @@ describe('parseFile — import extraction', () => {
   });
 });
 
+describe('parseFile — non-relative imports', () => {
+  it('extracts path alias imports', async () => {
+    const source = `import { useAuth } from '@/context/AuthContext';`;
+    const { imports } = await parseFile(source, 'typescript');
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0].names).toEqual(['useAuth']);
+    expect(imports[0].source).toBe('@/context/AuthContext');
+  });
+
+  it('extracts scoped package imports', async () => {
+    const source = `import type { ChatParams } from '@company/protocol';`;
+    const { imports } = await parseFile(source, 'typescript');
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0].names).toEqual(['ChatParams']);
+  });
+
+  it('extracts bare package imports', async () => {
+    const source = `import { useState } from 'react';`;
+    const { imports } = await parseFile(source, 'typescript');
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0].names).toEqual(['useState']);
+    expect(imports[0].source).toBe('react');
+  });
+
+  it('extracts non-relative namespace import member accesses', async () => {
+    const source = ['import * as helpers from "@/utils/helpers";', 'helpers.formatDate();'].join('\n');
+    const { imports } = await parseFile(source, 'typescript');
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0].names).toContain('formatDate');
+    expect(imports[0].source).toBe('@/utils/helpers');
+  });
+
+  it('extracts non-relative re-exports as imports, not symbols', async () => {
+    const source = `export { foo } from '@/utils';`;
+    const { imports, symbols } = await parseFile(source, 'typescript');
+
+    expect(imports).toHaveLength(1);
+    expect(imports[0].names).toEqual(['foo']);
+    expect(symbols.map((s) => s.name)).not.toContain('foo');
+  });
+});
+
 describe('parseFile — re-export extraction', () => {
   it('extracts named re-exports as import references (bug #6)', async () => {
     const source = `export { formatDate } from './date';`;

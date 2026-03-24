@@ -95,16 +95,6 @@ export async function extractSymbols(source: string, language: 'typescript' | 't
   return symbols;
 }
 
-const EXTENSIONS_RE = /\.(ts|tsx|js|jsx)$/;
-
-export function resolveImportPath(importerFile: string, importSource: string): string {
-  const dir = path.dirname(importerFile);
-  let resolved = path.normalize(path.join(dir, importSource));
-  resolved = resolved.replace(EXTENSIONS_RE, '');
-  resolved = resolved.replace(/\/index$/, '');
-  return resolved;
-}
-
 function visitChildren(node: Node, symbols: ExtractedSymbol[], exported: boolean): void {
   for (const child of node.namedChildren) {
     visitNode(child, symbols, exported);
@@ -140,12 +130,8 @@ function visitNode(node: Node, symbols: ExtractedSymbol[], exported: boolean): v
 }
 
 function handleExportStatement(node: Node, symbols: ExtractedSymbol[]): void {
-  // Skip re-exports (export { x } from './bar') — handled as imports in parseFile
-  const sourceNode = node.namedChildren.find((c) => c.type === 'string');
-  if (sourceNode) {
-    const source = sourceNode.text.replace(/['"]/g, '');
-    if (source.startsWith('.')) return;
-  }
+  // Skip re-exports (export { x } from '...') — handled as imports in parseFile
+  if (node.namedChildren.some((c) => c.type === 'string')) return;
 
   const exportClause = node.namedChildren.find((c) => c.type === 'export_clause');
   if (exportClause) {
@@ -252,7 +238,6 @@ function parseImportStatement(node: Node): ExtractedImport | null {
   const sourceNode = node.namedChildren.find((c) => c.type === 'string');
   if (!sourceNode) return null;
   const source = sourceNode.text.replace(/['"]/g, '');
-  if (!source.startsWith('.')) return null;
 
   const names: string[] = [];
   for (const child of node.namedChildren) {
@@ -287,7 +272,6 @@ function parseReExport(node: Node): ExtractedImport | null {
   const sourceNode = node.namedChildren.find((c) => c.type === 'string');
   if (!sourceNode) return null;
   const source = sourceNode.text.replace(/['"]/g, '');
-  if (!source.startsWith('.')) return null;
 
   const names: string[] = [];
   const exportClause = node.namedChildren.find((c) => c.type === 'export_clause');
@@ -311,7 +295,6 @@ function collectNamespaceImports(root: Node): Map<string, { source: string; line
     const sourceNode = child.namedChildren.find((c) => c.type === 'string');
     if (!sourceNode) continue;
     const source = sourceNode.text.replace(/['"]/g, '');
-    if (!source.startsWith('.')) continue;
 
     for (const clause of child.namedChildren) {
       if (clause.type !== 'import_clause') continue;

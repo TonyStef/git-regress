@@ -1,19 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.normalizePath = normalizePath;
 exports.deduplicateRefs = deduplicateRefs;
 exports.formatDuration = formatDuration;
-/**
- * Normalize a file path for consistent symbol matching.
- * Strips extensions and /index suffixes so that:
- *   src/utils/index.ts -> src/utils
- *   src/helpers.ts     -> src/helpers
- */
-function normalizePath(filePath) {
-    let normalized = filePath.replace(/\.(ts|tsx|js|jsx)$/, '');
-    normalized = normalized.replace(/\/index$/, '');
-    return normalized;
-}
 /**
  * Deduplicate an array of symbol references by name+file+kind.
  */

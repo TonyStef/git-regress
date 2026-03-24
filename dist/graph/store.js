@@ -11,6 +11,7 @@ exports.pruneOldFootprints = pruneOldFootprints;
 const fs_1 = __importDefault(require("fs"));
 const path_1 = __importDefault(require("path"));
 const git_1 = require("../git");
+const resolve_1 = require("../resolve");
 const STORE_DIR = '.git-regress';
 const STORE_FILE = 'footprints.json';
 function getStorePath() {
@@ -46,13 +47,22 @@ function addFootprint(footprint) {
     store[`pr_${footprint.number}`] = footprint;
     saveFootprints(store);
 }
+function canonicalizeRefs(refs) {
+    return refs.map((r) => ({ ...r, file: (0, resolve_1.canonicalizePath)(r.file) }));
+}
 function getRecentFootprints(lookbackDays) {
     const store = loadFootprints();
     const cutoff = Date.now() - lookbackDays * 24 * 60 * 60 * 1000;
-    return Object.values(store).filter((fp) => {
+    return Object.values(store)
+        .filter((fp) => {
         const mergedAt = new Date(fp.merged_at).getTime();
         return mergedAt >= cutoff;
-    });
+    })
+        .map((fp) => ({
+        ...fp,
+        symbols_added: canonicalizeRefs(fp.symbols_added),
+        symbols_referenced: canonicalizeRefs(fp.symbols_referenced),
+    }));
 }
 /**
  * Remove footprints older than the lookback window.

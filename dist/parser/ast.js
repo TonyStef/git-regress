@@ -5,7 +5,6 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.parseFile = parseFile;
 exports.extractSymbols = extractSymbols;
-exports.resolveImportPath = resolveImportPath;
 const path_1 = __importDefault(require("path"));
 const Parser = require("web-tree-sitter");
 let initialized = false;
@@ -49,6 +48,18 @@ async function parseFile(source, language) {
                 if (imp)
                     imports.push(imp);
             }
+            // Re-exports (export { x } from './bar') are import references
+            if (child.type === 'export_statement') {
+                const reExport = parseReExport(child);
+                if (reExport)
+                    imports.push(reExport);
+            }
+        }
+        // Resolve namespace import member accesses (import * as x from './y')
+        const nsImports = collectNamespaceImports(tree.rootNode);
+        if (nsImports.size > 0) {
+            const memberImports = resolveNamespaceMembers(tree.rootNode, nsImports);
+            imports.push(...memberImports);
         }
         return { symbols, imports };
     }
@@ -59,14 +70,6 @@ async function parseFile(source, language) {
 async function extractSymbols(source, language) {
     const { symbols } = await parseFile(source, language);
     return symbols;
-}
-const EXTENSIONS_RE = /\.(ts|tsx|js|jsx)$/;
-function resolveImportPath(importerFile, importSource) {
-    const dir = path_1.default.dirname(importerFile);
-    let resolved = path_1.default.normalize(path_1.default.join(dir, importSource));
-    resolved = resolved.replace(EXTENSIONS_RE, '');
-    resolved = resolved.replace(/\/index$/, '');
-    return resolved;
 }
 function visitChildren(node, symbols, exported) {
     for (const child of node.namedChildren) {
@@ -101,6 +104,9 @@ function visitNode(node, symbols, exported) {
     }
 }
 function handleExportStatement(node, symbols) {
+    // Skip re-exports (export { x } from '...') — handled as imports in parseFile
+    if (node.namedChildren.some((c) => c.type === 'string'))
+        return;
     const exportClause = node.namedChildren.find((c) => c.type === 'export_clause');
     if (exportClause) {
         for (const spec of exportClause.namedChildren) {
@@ -205,8 +211,6 @@ function parseImportStatement(node) {
     if (!sourceNode)
         return null;
     const source = sourceNode.text.replace(/['"]/g, '');
-    if (!source.startsWith('.'))
-        return null;
     const names = [];
     for (const child of node.namedChildren) {
         if (child.type === 'import_clause')
@@ -225,19 +229,89 @@ function collectImportNames(clause, names) {
             case 'named_imports':
                 for (const spec of child.namedChildren) {
                     if (spec.type === 'import_specifier') {
-                        const localName = (spec.childForFieldName('alias') ?? spec.childForFieldName('name'))?.text;
+                        const localName = spec.childForFieldName('name')?.text;
                         if (localName)
                             names.push(localName);
                     }
                 }
                 break;
-            case 'namespace_import': {
-                const id = child.namedChildren.find((c) => c.type === 'identifier');
-                if (id)
-                    names.push(id.text);
-                break;
+            // namespace_import (import * as x) is resolved via member expression
+            // analysis in parseFile — skip here to avoid tracking the namespace
+            // identifier as a symbol name
+        }
+    }
+}
+function parseReExport(node) {
+    const sourceNode = node.namedChildren.find((c) => c.type === 'string');
+    if (!sourceNode)
+        return null;
+    const source = sourceNode.text.replace(/['"]/g, '');
+    const names = [];
+    const exportClause = node.namedChildren.find((c) => c.type === 'export_clause');
+    if (exportClause) {
+        for (const spec of exportClause.namedChildren) {
+            if (spec.type === 'export_specifier') {
+                const nameNode = spec.childForFieldName('name');
+                if (nameNode)
+                    names.push(nameNode.text);
             }
         }
+    }
+    // export * from './foo' — can't enumerate individual symbols without reading the source file
+    if (names.length === 0)
+        return null;
+    return { names, source, line: node.startPosition.row + 1 };
+}
+function collectNamespaceImports(root) {
+    const nsImports = new Map();
+    for (const child of root.namedChildren) {
+        if (child.type !== 'import_statement')
+            continue;
+        const sourceNode = child.namedChildren.find((c) => c.type === 'string');
+        if (!sourceNode)
+            continue;
+        const source = sourceNode.text.replace(/['"]/g, '');
+        for (const clause of child.namedChildren) {
+            if (clause.type !== 'import_clause')
+                continue;
+            for (const sub of clause.namedChildren) {
+                if (sub.type === 'namespace_import') {
+                    const id = sub.namedChildren.find((c) => c.type === 'identifier');
+                    if (id)
+                        nsImports.set(id.text, { source, line: child.startPosition.row + 1 });
+                }
+            }
+        }
+    }
+    return nsImports;
+}
+function resolveNamespaceMembers(root, nsImports) {
+    const membersBySource = new Map();
+    walkMemberExpressions(root, nsImports, membersBySource);
+    return Array.from(membersBySource.values()).map(({ names, source, line }) => ({
+        names: Array.from(names),
+        source,
+        line,
+    }));
+}
+function walkMemberExpressions(node, nsImports, results) {
+    if (node.type === 'member_expression') {
+        const object = node.childForFieldName('object');
+        const property = node.childForFieldName('property');
+        if (object?.type === 'identifier' && property) {
+            const nsInfo = nsImports.get(object.text);
+            if (nsInfo) {
+                let entry = results.get(nsInfo.source);
+                if (!entry) {
+                    entry = { names: new Set(), line: nsInfo.line, source: nsInfo.source };
+                    results.set(nsInfo.source, entry);
+                }
+                entry.names.add(property.text);
+            }
+        }
+    }
+    for (const child of node.namedChildren) {
+        walkMemberExpressions(child, nsImports, results);
     }
 }
 function buildFnSig(node) {

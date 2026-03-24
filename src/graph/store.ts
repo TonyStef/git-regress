@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { getRepoRoot } from '../git';
-import type { FootprintStore, PRFootprint } from './footprint';
+import { canonicalizePath } from '../resolve';
+import type { FootprintStore, PRFootprint, SymbolRef } from './footprint';
 
 const STORE_DIR = '.git-regress';
 const STORE_FILE = 'footprints.json';
@@ -43,14 +44,24 @@ export function addFootprint(footprint: PRFootprint): void {
   saveFootprints(store);
 }
 
+function canonicalizeRefs(refs: SymbolRef[]): SymbolRef[] {
+  return refs.map((r) => ({ ...r, file: canonicalizePath(r.file) }));
+}
+
 export function getRecentFootprints(lookbackDays: number): PRFootprint[] {
   const store = loadFootprints();
   const cutoff = Date.now() - lookbackDays * 24 * 60 * 60 * 1000;
 
-  return Object.values(store).filter((fp) => {
-    const mergedAt = new Date(fp.merged_at).getTime();
-    return mergedAt >= cutoff;
-  });
+  return Object.values(store)
+    .filter((fp) => {
+      const mergedAt = new Date(fp.merged_at).getTime();
+      return mergedAt >= cutoff;
+    })
+    .map((fp) => ({
+      ...fp,
+      symbols_added: canonicalizeRefs(fp.symbols_added),
+      symbols_referenced: canonicalizeRefs(fp.symbols_referenced),
+    }));
 }
 
 /**
