@@ -50,6 +50,31 @@ function toRef(sym: ExtractedSymbol, file: string): SymbolRef {
   return { name: sym.name, file, kind: sym.kind };
 }
 
+function groupByKey(symbols: ExtractedSymbol[]): Map<string, ExtractedSymbol[]> {
+  const groups = new Map<string, ExtractedSymbol[]>();
+  for (const sym of symbols) {
+    const key = `${sym.name}:${sym.kind}`;
+    const group = groups.get(key);
+    if (group) group.push(sym);
+    else groups.set(key, [sym]);
+  }
+  return groups;
+}
+
+function hasSignatureChange(oldGroup: ExtractedSymbol[], newGroup: ExtractedSymbol[]): boolean {
+  const oldSigs = oldGroup
+    .map((s) => s.signature)
+    .filter(Boolean)
+    .sort();
+  const newSigs = newGroup
+    .map((s) => s.signature)
+    .filter(Boolean)
+    .sort();
+  if (oldSigs.length === 0 || newSigs.length === 0) return false;
+  if (oldSigs.length !== newSigs.length) return true;
+  return oldSigs.some((sig, i) => sig !== newSigs[i]);
+}
+
 /**
  * Store a symbol footprint for a merged PR.
  * Shared by CLI and GitHub Action entry points.
@@ -130,8 +155,9 @@ export async function runCheck(opts: CheckOptions): Promise<CheckResult> {
       const oldSource = getFileAtRef(opts.base, filePath);
       if (!oldSource) continue;
       const oldSymbols = await extractSymbols(oldSource, getLanguage(filePath));
-      for (const sym of oldSymbols) {
-        deletedSymbols.push(toRef(sym, canonicalizePath(filePath)));
+      const canonical = canonicalizePath(filePath);
+      for (const [, group] of groupByKey(oldSymbols)) {
+        deletedSymbols.push(toRef(group[0], canonical));
       }
       continue;
     }
@@ -145,21 +171,17 @@ export async function runCheck(opts: CheckOptions): Promise<CheckResult> {
     const lang = getLanguage(file.newPath!);
     const oldSymbols = await extractSymbols(oldSource, lang);
     const newSymbols = await extractSymbols(newSource, lang);
+    const canonical = canonicalizePath(file.newPath ?? file.oldPath!);
 
-    const newSymbolMap = new Map<string, ExtractedSymbol>();
-    for (const sym of newSymbols) {
-      newSymbolMap.set(`${sym.name}:${sym.kind}`, sym);
-    }
+    const oldGroups = groupByKey(oldSymbols);
+    const newGroups = groupByKey(newSymbols);
 
-    for (const oldSym of oldSymbols) {
-      const key = `${oldSym.name}:${oldSym.kind}`;
-      const newSym = newSymbolMap.get(key);
-      const canonical = canonicalizePath(file.newPath ?? file.oldPath!);
-
-      if (!newSym) {
-        deletedSymbols.push(toRef(oldSym, canonical));
-      } else if (oldSym.signature && newSym.signature && oldSym.signature !== newSym.signature) {
-        modifiedSymbols.push(toRef(oldSym, canonical));
+    for (const [key, oldGroup] of oldGroups) {
+      const newGroup = newGroups.get(key);
+      if (!newGroup) {
+        deletedSymbols.push(toRef(oldGroup[0], canonical));
+      } else if (hasSignatureChange(oldGroup, newGroup)) {
+        modifiedSymbols.push(toRef(oldGroup[0], canonical));
       }
     }
   }
